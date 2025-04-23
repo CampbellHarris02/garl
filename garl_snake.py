@@ -1,10 +1,10 @@
-import pygame
+import pygame # type: ignore
 import numpy as np
 import random
 import sys
 import math
 from collections import defaultdict, deque
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt # type: ignore
 # make pretty
 from rich.progress import track
 from rich.console import Console
