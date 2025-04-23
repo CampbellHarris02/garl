@@ -19,13 +19,13 @@ DIRS = [(0, -1), (1, 0), (0, 1), (-1, 0)]
 ACTIONS = [-1, 0, 1]  # left, forward, right
 
 # GA params
-POP_SIZE = 3000
-GENS = 300
-MUTATION_RATE = 0.1
-ELITE_CUTOFF = 0.3
-STEPS_PER_GAME = 200
+POP_SIZE = 10000
+GENS = 100
+MUTATION_RATE = 0.01
+ELITE_CUTOFF = 0.1
+STEPS_PER_GAME = 10000
 
-FOOD_VALUE = 2
+FOOD_VALUE = 1
 
 # Game logic
 class SnakeGame:
@@ -38,7 +38,9 @@ class SnakeGame:
         self.place_food()
         self.score = 0
         self.steps = 0
+        self.head_history = deque(maxlen=24)  # track last head positions
         return self.get_state()
+
 
     def place_food(self):
         while True:
@@ -52,6 +54,16 @@ class SnakeGame:
         head = (self.snake[0][0] + dx, self.snake[0][1] + dy)
 
         self.steps += 1
+        self.head_history.appendleft(head)
+
+        # Infinite loop detection (broader pattern check)
+        if len(self.snake) < 3 and len(self.head_history) >= 12:
+            recent = list(self.head_history)
+            for window in [4, 6]:
+                if len(recent) >= 2 * window and recent[:window] == recent[window:2*window]:
+                    return self.get_state(), True  # Loop detected
+
+
         if head[0] < 0 or head[0] >= GRID_SIZE or head[1] < 0 or head[1] >= GRID_SIZE or head in self.snake:
             return self.get_state(), True
 
@@ -90,12 +102,15 @@ def random_policy():
 def evaluate_policy(policy):
     game = SnakeGame()
     state = game.reset()
-    for _ in range(STEPS_PER_GAME):
+    console = Console()
+    for step in range(STEPS_PER_GAME):
         action = policy[state]
         state, done = game.step(action)
         if done:
             break
+
     return math.log(game.steps + 1) + game.score
+
 
 def mutate(policy):
     new_policy = defaultdict(lambda: random.choice(ACTIONS))
@@ -116,8 +131,10 @@ def run_genetic_snake():
     console = Console()
     population = [random_policy() for _ in range(POP_SIZE)]
     history = []
+    history_top10 = []
     best_policy = None
     best_fitness = -float("inf")
+    
 
     for gen in range(GENS):
         console.rule(f"[bold cyan]Generation {gen + 1}/{GENS}")
@@ -129,6 +146,8 @@ def run_genetic_snake():
         elites = [population[i] for i in sorted_indices]
 
         top_10 = sorted(fitnesses, reverse=True)[:10]
+        history_top10.append(top_10)
+        
         console.log(f"[bold green]Best fitness: {top_10[0]:.2f}")
         console.log(f"Top 10: {[f'{x:.2f}' for x in top_10]}")
 
@@ -156,7 +175,7 @@ def run_genetic_snake():
             break
     console.print(table)
 
-    return best_policy, history
+    return best_policy, history, history_top10
 
 
 # Run best policy
@@ -192,13 +211,24 @@ def simulate(policy):
 
 # Run everything
 if __name__ == "__main__":
-    best, hist = run_genetic_snake()
+    best, hist, hist_top = run_genetic_snake()
 
     # Plot
     plt.plot(hist)
     plt.title("Best Fitness per Generation")
     plt.xlabel("Generation")
     plt.ylabel("log(steps) + score")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+    
+    # plot top 10 history
+    for i in range(10):
+        plt.plot(hist_top[:, i], label=f'Top {i+1}', alpha=0.8)
+    plt.title("Top 10 Individual Fitness per Generation")
+    plt.xlabel("Generation")
+    plt.ylabel("Fitness")
+    plt.legend()
     plt.grid(True)
     plt.tight_layout()
     plt.show()
