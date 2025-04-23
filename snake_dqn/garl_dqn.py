@@ -6,6 +6,7 @@ from rich.progress import track
 
 console = Console()
 
+# ── Hyperparameter Bounds ──
 PARAM_BOUNDS = {
     "lr": (1e-5, 1e-2),
     "gamma": (0.8, 0.99),
@@ -16,11 +17,18 @@ PARAM_BOUNDS = {
     "replay_buffer_size": (1000, 10000),
     "target_update_interval": (1, 20),
     "hidden_1": (32, 256),
-    "hidden_2": (16, 128)
+    "hidden_2": (16, 128),
+    "reward_food": (0.1, 10),
+    "reward_step": (-0.1, 0.1)
 }
 
-POP_SIZE = 20
+# ── GA Parameters ──
+POP_SIZE = 30
 GENERATIONS = 10
+MUTATION_RATE = 0.1
+ELITE_PERCENT = 0.2
+EPISODES = 250
+MAX_STEPS = 1000
 
 def random_config():
     return {
@@ -34,12 +42,14 @@ def random_config():
         "target_update_interval": int(random.uniform(*PARAM_BOUNDS["target_update_interval"])),
         "hidden_1": random.randint(*PARAM_BOUNDS["hidden_1"]),
         "hidden_2": random.randint(*PARAM_BOUNDS["hidden_2"]),
+        "reward_food": random.uniform(*PARAM_BOUNDS["reward_food"]),
+        "reward_step": random.uniform(*PARAM_BOUNDS["reward_step"])
     }
 
 def mutate_config(cfg):
     new_cfg = cfg.copy()
     for k in PARAM_BOUNDS:
-        if random.random() < 0.3:
+        if random.random() < MUTATION_RATE:
             if isinstance(PARAM_BOUNDS[k][0], int):
                 new_cfg[k] = random.randint(*PARAM_BOUNDS[k])
             else:
@@ -49,9 +59,48 @@ def mutate_config(cfg):
 def crossover_configs(cfg1, cfg2):
     return {k: random.choice([cfg1[k], cfg2[k]]) for k in cfg1}
 
+def test_dqn(model, cfg, episodes=5, max_steps=1000):
+    from snake_game import SnakeGame
+    import torch
+    import numpy as np
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.eval()
+    model.to(device)
+
+    lengths = []
+
+    for _ in range(episodes):
+        env = SnakeGame()
+        state = np.array(env.reset(), dtype=np.float32)
+
+        for _ in range(max_steps):
+            state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(device)
+            with torch.no_grad():
+                action = torch.argmax(model(state_tensor)).item() - 1  # Shift to [-1, 0, 1]
+
+            state, done = env.step(action)
+            state = np.array(state, dtype=np.float32)
+
+            if done:
+                break
+
+        lengths.append(len(env.snake))
+
+    return np.mean(lengths)
+
+
 def evaluate_config(cfg):
-    avg_reward, *_ = train_dqn(cfg, episodes=100, max_steps=1000)
-    return avg_reward
+    import torch.nn as nn
+    import torch
+    from snake_game import SnakeGame  # Needed for state size and model instantiation
+    from model import DQN             # Your DQN model
+
+    avg_reward, _, _, _, model = train_dqn(cfg, episodes=EPISODES, max_steps=MAX_STEPS)
+    cfg["__model__"] = model
+    return test_dqn(model, cfg)
+
+
 
 def normalize_scores(scores):
     scores = np.array(scores)
@@ -62,40 +111,36 @@ def garl_dqn():
 
     for gen in range(GENERATIONS):
         console.rule(f"[bold cyan]Meta Generation {gen+1}/{GENERATIONS}")
-        scores = []
+        scores = [evaluate_config(cfg) for cfg in track(population, description="Evaluating configs")]
 
-        for cfg in track(population, description="Evaluating configs"):
-            score = evaluate_config(cfg)
-            scores.append(score)
-
+        best_score = np.max(scores)
         avg_score = np.mean(scores)
         std_score = np.std(scores)
         best_idx = np.argmax(scores)
+        best_cfg = population[best_idx]
 
-        console.log(f":trophy: [bold green]Best Score: {scores[best_idx]:.4f} with config:")
-        console.log(f":bar_chart: [bold cyan]Average Score: {avg_score:.4f}")
-        console.log(f":chart_with_upwards_trend: [bold magenta]Std Dev Score: {std_score:.4f}")
-        for k, v in population[best_idx].items():
-            console.print(f"  [bold]{k}[/bold]: {v}")
-        
+        console.log(f":trophy: [bold green]Best Snake Length: {best_score:.2f}")
+        console.log(f":bar_chart: [bold cyan]Avg Length (Pop): {avg_score:.2f}")
+        console.log(f":chart_with_upwards_trend: [bold magenta]Std Dev: {std_score:.2f}")
+        for k, v in best_cfg.items():
+            if k != "__model__":
+                console.print(f"  [bold]{k}[/bold]: {v}")
 
-        # Evolution
-        top_half = [cfg for _, cfg in sorted(zip(scores, population), reverse=True)[:POP_SIZE//2]]
-        norm_scores = normalize_scores(scores)
+        elite_count = int(POP_SIZE * ELITE_PERCENT)
+        top_elite = [cfg for score, cfg in sorted(zip(scores, population), key=lambda x: x[0], reverse=True)[:elite_count]]
 
-        new_pop = [population[best_idx]]  # Elitism
+        new_pop = [best_cfg]
         while len(new_pop) < POP_SIZE:
-            parents = random.choices(top_half, k=2)
+            parents = random.choices(top_elite, k=2)
             child = mutate_config(crossover_configs(*parents))
             new_pop.append(child)
 
         population = new_pop
 
-    return population[0]
+    return best_cfg
 
 if __name__ == "__main__":
-    best = garl_dqn()
+    best = {k: v for k, v in garl_dqn().items() if k != "__model__"}
     console.rule("[bold green]Best Config Found")
     for k, v in best.items():
         console.print(f'  "{k}": {v},')
-
