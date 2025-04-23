@@ -10,7 +10,7 @@ from default_config import default_config
 from visualize_dqn_plots import plot_rewards, plot_epsilon, plot_loss
 import pygame  # type: ignore
 
-def simulate_trained_model(model, config):
+def simulate_trained_model(model, config, stack_size):
     """Simulate the Snake game using a trained DQN model."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.eval()
@@ -18,8 +18,9 @@ def simulate_trained_model(model, config):
     pygame.init()
     screen = pygame.display.set_mode((600, 600))
     clock = pygame.time.Clock()
-    game = SnakeGame()
-    state = game.reset()
+    game = SnakeGame(stack_size=stack_size)
+    
+    state = game.reset()  # <- Add this to initialize state
     done = False
 
     while not done:
@@ -47,8 +48,6 @@ def simulate_trained_model(model, config):
     pygame.quit()
 
 
-
-
 def compute_reward(score, prev_score, reward_food, reward_step):
     return reward_food if score > prev_score else reward_step
 
@@ -62,11 +61,11 @@ def select_action(state, model, epsilon, device):
         return torch.argmax(q_values).item() - 1  # shift to [-1, 0, 1]
 
 
-def train_dqn(config, episodes=5000, max_steps=5000):
+def train_dqn(config, episodes=1000, max_steps=5000):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    game = SnakeGame()
-    state_size = len(game.get_state())
+    memory_frames = 4
+    game = SnakeGame(stack_size=memory_frames)
+    state_size = len(game.reset())
     action_size = 3  # Actions: [-1, 0, 1]
 
     model = DQN(state_size, action_size, config).to(device)
@@ -89,7 +88,7 @@ def train_dqn(config, episodes=5000, max_steps=5000):
     total_rewards, epsilon_history, loss_history = [], [], []
 
     for episode in range(episodes):
-        game = SnakeGame()
+        game = SnakeGame(stack_size=memory_frames)
         game.snake = deque([(5, 5 - i) for i in range(random.randint(1, 30))])
         state = np.array(game.reset(), dtype=np.float32)
         total_reward = 0
@@ -136,6 +135,12 @@ def train_dqn(config, episodes=5000, max_steps=5000):
         epsilon_history.append(epsilon)
         loss_history.append(episode_loss)
         total_rewards.append(game.score + np.log(game.steps + 1))
+        
+    torch.save({
+        "model_state_dict": model.state_dict(),
+        "config": config,
+        "stack_size": len(game.state_stack) if hasattr(game, "state_stack") else 1,
+    }, "trained_dqn.pth")
 
     return np.mean(total_rewards[-10:]), total_rewards, epsilon_history, loss_history, model
 
@@ -147,7 +152,14 @@ if __name__ == "__main__":
     plot_epsilon(epsilon_history)
     plot_loss(loss_history)
 
-    # Simulate with the trained model
-    model = DQN(len(SnakeGame().get_state()), 3, default_config)
-    model.load_state_dict(torch.load("trained_dqn.pth"))
-    simulate_trained_model(model, default_config)
+    # Load model and config
+    checkpoint = torch.load("trained_dqn.pth")
+    config = checkpoint["config"]
+    stack_size = checkpoint["stack_size"]
+    state_size = 9 * stack_size
+
+    # Rebuild the model with correct input size
+    model = DQN(state_size, 3, config)
+    model.load_state_dict(checkpoint["model_state_dict"])
+
+    simulate_trained_model(model, config, stack_size=stack_size)
