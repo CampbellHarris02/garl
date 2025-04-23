@@ -1,0 +1,8 @@
+file: ga_qlearn_snake.py
+- search for optimal training parameters and reward parameters of the q-learning algorithm
+
+file: qlearn_snake.py
+- input parameters and run training
+
+file: garl_snake.py
+- direct initialization of q-table with policy adjustments via genetic algorithms
