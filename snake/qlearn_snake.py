@@ -1,9 +1,5 @@
 # final_snake.py
-    """ 
 
-    Returns:
-        _type_: _description_
-    """
 import pygame
 import numpy as np
 import random
