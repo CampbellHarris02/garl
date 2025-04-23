@@ -73,11 +73,11 @@ def garl_dqn():
         best_idx = np.argmax(scores)
 
         console.log(f":trophy: [bold green]Best Score: {scores[best_idx]:.4f} with config:")
-        for k, v in population[best_idx].items():
-            console.print(f"  [bold]{k}[/bold]: {v}")
-
         console.log(f":bar_chart: [bold cyan]Average Score: {avg_score:.4f}")
         console.log(f":chart_with_upwards_trend: [bold magenta]Std Dev Score: {std_score:.4f}")
+        for k, v in population[best_idx].items():
+            console.print(f"  [bold]{k}[/bold]: {v}")
+        
 
         # Evolution
         top_half = [cfg for _, cfg in sorted(zip(scores, population), reverse=True)[:POP_SIZE//2]]

@@ -8,9 +8,47 @@ from snake_game import SnakeGame
 from model import DQN
 from default_config import default_config
 from visualize_dqn_plots import plot_rewards, plot_epsilon, plot_loss
+import pygame  # type: ignore
+
+def simulate_trained_model(model, config):
+    """Simulate the Snake game using a trained DQN model."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.eval()
+
+    pygame.init()
+    screen = pygame.display.set_mode((600, 600))
+    clock = pygame.time.Clock()
+    game = SnakeGame()
+    state = game.reset()
+    done = False
+
+    while not done:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return
+
+        state_tensor = torch.tensor(np.array(state, dtype=np.float32)).unsqueeze(0).to(device)
+        with torch.no_grad():
+            action = torch.argmax(model(state_tensor)).item() - 1
+
+        state, done = game.step(action)
+
+        # Draw
+        screen.fill((0, 0, 0))
+        fx, fy = game.food
+        pygame.draw.rect(screen, (255, 0, 0), (fx * 75, fy * 75, 75, 75))  # tile size = 600/8 = 75
+        for x, y in game.snake:
+            pygame.draw.rect(screen, (0, 255, 0), (x * 75, y * 75, 75, 75))
+        pygame.display.flip()
+        clock.tick(10)
+
+    print(f"Final score: {game.score}, Duration: {game.steps} steps")
+    pygame.quit()
+
 
 # DQN Training Function
-def train_dqn(config, episodes=50, max_steps=1000):
+def train_dqn(config, episodes=500, max_steps=1000):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     game = SnakeGame()
@@ -88,6 +126,8 @@ def train_dqn(config, episodes=50, max_steps=1000):
         epsilon_history.append(epsilon)
         loss_history.append(episode_loss)
         total_rewards.append(game.score + np.log(game.steps + 1))
+        
+        torch.save(model.state_dict(), "trained_dqn.pth")
 
     return np.mean(total_rewards[-10:]), total_rewards, epsilon_history, loss_history
 
@@ -97,3 +137,8 @@ if __name__ == "__main__":
     plot_rewards(total_rewards)
     plot_epsilon(epsilon_history)
     plot_loss(loss_history)
+    
+    # Simulate with the trained model
+    model = DQN(len(SnakeGame().get_state()), 3, default_config)
+    model.load_state_dict(torch.load("trained_dqn.pth"))
+    simulate_trained_model(model, default_config)
