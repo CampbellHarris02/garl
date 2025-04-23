@@ -10,6 +10,10 @@ from rich.progress import track
 from rich.console import Console
 from rich.table import Table
 
+# Genetic Method
+# from mamal import mutate, crossover
+from snake.jellyfish import replicate
+
 
 # Game constants
 GRID_SIZE = 8
@@ -19,10 +23,9 @@ DIRS = [(0, -1), (1, 0), (0, 1), (-1, 0)]
 ACTIONS = [-1, 0, 1]  # left, forward, right
 
 # GA params
-POP_SIZE = 10000
-GENS = 100
-MUTATION_RATE = 0.01
-ELITE_CUTOFF = 0.1
+POP_SIZE = 1000
+GENS = 20
+MUTATION_RATE = 0.1
 STEPS_PER_GAME = 10000
 
 FOOD_VALUE = 1
@@ -97,7 +100,26 @@ class SnakeGame:
 
 # Genetic structure
 def random_policy():
-    return defaultdict(lambda: random.choice(ACTIONS))
+    policy = defaultdict(lambda: random.choice(ACTIONS))
+
+    directions = [0, 1, 2, 3]
+    food_deltas = [-1, 0, 1]
+    dangers = [0, 1]
+    snake_lengths = list(range(1, 6))  # keep reasonable
+    for x in range(GRID_SIZE):
+        for y in range(GRID_SIZE):
+            for fx in food_deltas:
+                for fy in food_deltas:
+                    for d in directions:
+                        for ds in dangers:
+                            for dr in dangers:
+                                for dl in dangers:
+                                    for l in snake_lengths:
+                                        state = (fx, fy, d, ds, dr, dl, l, x, y)
+                                        policy[state] = random.choice(ACTIONS)
+
+    return policy
+
 
 def evaluate_policy(policy):
     game = SnakeGame()
@@ -112,20 +134,6 @@ def evaluate_policy(policy):
     return math.log(game.steps + 1) + game.score
 
 
-def mutate(policy):
-    new_policy = defaultdict(lambda: random.choice(ACTIONS))
-    for k in policy:
-        if random.random() < MUTATION_RATE:
-            new_policy[k] = random.choice(ACTIONS)
-        else:
-            new_policy[k] = policy[k]
-    return new_policy
-
-def crossover(p1, p2):
-    child = defaultdict(lambda: random.choice(ACTIONS))
-    for k in set(p1.keys()).union(p2.keys()):
-        child[k] = p1[k] if random.random() < 0.5 else p2[k]
-    return child
 
 def run_genetic_snake():
     console = Console()
@@ -134,7 +142,6 @@ def run_genetic_snake():
     history_top10 = []
     best_policy = None
     best_fitness = -float("inf")
-    
 
     for gen in range(GENS):
         console.rule(f"[bold cyan]Generation {gen + 1}/{GENS}")
@@ -142,12 +149,9 @@ def run_genetic_snake():
         for policy in track(population, description="Evaluating..."):
             fitnesses.append(evaluate_policy(policy))
 
-        sorted_indices = np.argsort(fitnesses)[-int(ELITE_CUTOFF * POP_SIZE):]
-        elites = [population[i] for i in sorted_indices]
-
         top_10 = sorted(fitnesses, reverse=True)[:10]
         history_top10.append(top_10)
-        
+
         console.log(f"[bold green]Best fitness: {top_10[0]:.2f}")
         console.log(f"Top 10: {[f'{x:.2f}' for x in top_10]}")
 
@@ -155,13 +159,25 @@ def run_genetic_snake():
             best_fitness = top_10[0]
             best_policy = population[fitnesses.index(best_fitness)]
 
-        children = []
-        while len(children) < POP_SIZE:
-            parents = random.sample(elites, 2)
-            child = mutate(crossover(parents[0], parents[1]))
-            children.append(child)
+        # Cube fitness values to exaggerate top scores
+        fitnesses_cubed = [f**3 for f in fitnesses]
+        total_cubed = sum(fitnesses_cubed)
 
-        population = children
+        # Compute proportional allocation
+        allocations = [round((f / total_cubed) * POP_SIZE) for f in fitnesses_cubed]
+
+        # Generate children based on allocation
+        new_population = []
+        for policy, num_kids in zip(population, allocations):
+            new_population.extend(replicate(policy, ACTIONS, num_kids, MUTATION_RATE))
+
+        # Trim or pad to match POP_SIZE
+        if len(new_population) > POP_SIZE:
+            new_population = new_population[:POP_SIZE]
+        elif len(new_population) < POP_SIZE:
+            new_population.extend([random_policy() for _ in range(POP_SIZE - len(new_population))])
+
+        population = new_population
         history.append(best_fitness)
 
     # Log top policy entries
@@ -176,6 +192,7 @@ def run_genetic_snake():
     console.print(table)
 
     return best_policy, history, history_top10
+
 
 
 # Run best policy
@@ -223,8 +240,10 @@ if __name__ == "__main__":
     plt.show()
     
     # plot top 10 history
+    hist_top_array = np.array(hist_top)  # convert to 2D array
+
     for i in range(10):
-        plt.plot(hist_top[:, i], label=f'Top {i+1}', alpha=0.8)
+        plt.plot(hist_top_array[:, i], label=f'Top {i+1}', alpha=0.8)
     plt.title("Top 10 Individual Fitness per Generation")
     plt.xlabel("Generation")
     plt.ylabel("Fitness")
@@ -232,5 +251,6 @@ if __name__ == "__main__":
     plt.grid(True)
     plt.tight_layout()
     plt.show()
+
 
     simulate(best)
